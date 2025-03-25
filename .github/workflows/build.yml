@@ -65,17 +65,11 @@ jobs:
         echo "Version: $(date +%Y%m%d)" >> ./ipkg/control
         # 使用OpenWrt SDK打包
         ../openwrt-sdk/scripts/ipkg-build -o root -g root ./ipkg
-        mv *.ipk ./
+        mv *.ipk ${{ github.workspace }}
 
-    - name: Upload artifact
-      uses: actions/upload-artifact@v3
-      with:
-        name: ffmpeg-custom
-        path: ffmpeg/*.ipk
-        
     - name: Release and Upload Assets
       uses: softprops/action-gh-release@v1
       with:
-        files: "ffmpeg/*.ipk"
+        files: "*.ipk"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
