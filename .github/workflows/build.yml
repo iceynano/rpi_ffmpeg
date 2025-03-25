@@ -1,0 +1,81 @@
+name: Build FFmpeg with OMX/MMAL
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential libtool autoconf pkg-config zstd
+
+    - name: Download OpenWrt SDK
+      run: |
+        wget https://downloads.openwrt.org/releases/24.10.0/targets/bcm27xx/bcm2711/openwrt-sdk-24.10.0-bcm27xx-bcm2711_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+        mkdir openwrt-sdk
+        zstd -d openwrt-sdk-*.tar.zst --stdout | tar -xvf - -C openwrt-sdk --strip=1
+
+    - name: Install MMAL/OMX dependencies
+      run: |
+        # 假设MMAL和OMX库已通过OpenWrt包提供
+        ./openwrt-sdk/scripts/feeds update
+        ./openwrt-sdk/scripts/feeds install libmmal libomxil
+
+    - name: Clone FFmpeg source
+      run: |
+        git clone --depth 1 https://git.ffmpeg.org/ffmpeg.git
+        cd ffmpeg
+
+    - name: Configure FFmpeg with OMX/MMAL
+      run: |
+        cd ffmpeg
+        export STAGING_DIR=$(pwd)/../openwrt-sdk/staging_dir
+        export PATH=$STAGING_DIR/toolchain-arm_cortex-a72+neon-vfpv4_gcc-13.3.0_musl/bin:$PATH
+        ./configure \
+          --target-os=linux \
+          --arch=arm64 \
+          --enable-cross-compile \
+          --cross-prefix=aarch64-openwrt-linux- \
+          --prefix=/usr \
+          --enable-nonfree \
+          --enable-gpl \
+          --enable-omx \
+          --enable-omx-rpi \
+          --enable-mmal \
+          --extra-cflags="-I$STAGING_DIR/target/usr/include -I$STAGING_DIR/target/usr/include/IL" \
+          --extra-ldflags="-L$STAGING_DIR/target/usr/lib"
+        make -j$(nproc)
+
+    - name: Package FFmpeg as IPK
+      run: |
+        # 使用OpenWrt SDK生成ipk包
+        cd ffmpeg
+        mkdir -p ./ipkg/usr/bin
+        cp ffmpeg ffprobe ./ipkg/usr/bin/
+        # 创建控制文件（需自定义）
+        echo "Package: ffmpeg" > ./ipkg/control
+        echo "Version: $(date +%Y%m%d)" >> ./ipkg/control
+        # 使用OpenWrt SDK打包
+        ../openwrt-sdk/scripts/ipkg-build -o root -g root ./ipkg
+        mv *.ipk ./
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: ffmpeg-custom
+        path: ffmpeg/*.ipk
+        
+    - name: Release and Upload Assets
+      uses: softprops/action-gh-release@v1
+      with:
+        files: "ffmpeg/*.ipk"
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
